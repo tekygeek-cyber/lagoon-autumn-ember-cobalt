@@ -1,0 +1,8 @@
+fastapi>=0.115
+uvicorn>=0.32
+websockets>=13
+growwapi>=1.5.0
+pyotp>=2.9
+pandas>=2.2
+numpy>=2.0
+requests>=2.31

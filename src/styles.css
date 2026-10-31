@@ -1,0 +1,99 @@
+@import "tailwindcss";
+@import "@fontsource/outfit/400.css";
+@import "@fontsource/outfit/500.css";
+@import "@fontsource/outfit/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+/*
+  Theme tokens. Change the variables below to restyle the desk.
+  Accent presets are selected in the header (blue, sea, brass) and stored
+  in the browser. Add another preset by copying a [data-accent] block.
+*/
+:root {
+  --bg: #0b1016;
+  --surface: #121922;
+  --surface-2: #1a2330;
+  --fg: #e7eef7;
+  --muted: #93a1b5;
+  --line: #2a3648;
+  --accent: #4ea1ff;
+  --accent-fg: #061018;
+  --up: #3dcc8e;
+  --down: #f07272;
+  --watch: #e2b15a;
+  --hold: #9aafc4;
+}
+
+[data-accent="sea"] {
+  --accent: #2fbfa0;
+  --accent-fg: #041410;
+}
+
+[data-accent="brass"] {
+  --accent: #e0b15a;
+  --accent-fg: #1a1204;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-primary: var(--accent);
+  --color-primary-fg: var(--accent-fg);
+  --color-border: var(--line);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-watch: var(--watch);
+  --color-hold: var(--hold);
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  html {
+    color-scheme: dark;
+    background: var(--bg);
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "Outfit", ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.5;
+  }
+
+  .num {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .swatch-blue { background: #4ea1ff; }
+  .swatch-sea { background: #2fbfa0; }
+  .swatch-brass { background: #e0b15a; }
+  .tone-up { background: color-mix(in srgb, var(--up) 18%, transparent); color: var(--up); }
+  .tone-down { background: color-mix(in srgb, var(--down) 18%, transparent); color: var(--down); }
+  .tone-watch { background: color-mix(in srgb, var(--watch) 18%, transparent); color: var(--watch); }
+  .tone-hold { background: color-mix(in srgb, var(--hold) 18%, transparent); color: var(--hold); }
+  .note-down { border-color: color-mix(in srgb, var(--down) 45%, transparent); }
+  .note-watch { border-color: color-mix(in srgb, var(--watch) 45%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
