@@ -1,29 +1,77 @@
-# Trading engine sample-data test suite
+# Offline sample-data validation suite
 
-This directory contains a deterministic, offline-only validation suite for the app's real signal and backtest logic. The suite intentionally exercises the actual sample-data entry points instead of mocks of the strategy engine itself.
+This suite targets the actual Python signal engine and strategy backtest in the repository without any network access or API keys. It exercises the real sample-data path in `backend.engine.build_demo_closes`, `engine.latest_crossover`, `engine.monte_carlo`, and `strategies.sample_history` / `strategies.backtest`.
 
-Sample-data entry points exercised by the tests
-- backend.engine.build_demo_closes(...)
-- backend.engine.latest_crossover(...)
-- backend.engine.monte_carlo(...)
-- backend.strategies.sample_history(...)
-- backend.strategies.backtest(...)
+## Exact offline run command
 
-Determinism assumptions
-- The sample data generator is deterministic by construction: it derives the trend and price scale from the symbol plus fixed configuration, and it produces the same series for repeated runs.
-- The Monte Carlo simulation uses a deterministic seed derived from the ticker, path count, horizon, and return count, so repeated runs are stable unless the underlying price history changes.
-- No API-key environment variables are allowed for the suite; the test harness fails immediately if any of the key names are present.
+```bash
+cd /path/to/repo
+PYTHONPATH=$PWD/backend pytest -q tests
+```
 
-Offline enforcement
-- The suite patches socket and urllib boundaries to raise if any code attempts a network call.
-- This keeps the suite runnable on a clean machine with outbound network disabled and no secrets.
+## Three autouse guards
 
-Blockers / limitations
-- No sample-data or strategy blockers were encountered. The repository exposes enough built-in sample history for SMA crossovers and rolling-window checks.
-- There is no explicit transaction-cost or slippage model in the current backtest engine; the tests therefore validate that trade-level return calculations are internally consistent with the actual close-to-close logic instead of assuming a hidden cost model that is not present in the code.
+The suite includes three autouse fixtures in `tests/conftest.py`:
 
-How to run
-- python -m unittest discover -s tests -p "test_*.py" -v
+1. `_no_api_keys`
+   - Fails fast if an API-key-like environment variable is present.
+   - It allows CI and interpreter variables such as `GITHUB_ACTIONS`, `PYTHONPATH`, `HOME`, `PATH`, `USER`, `SHELL`, `LANG`, and `LC_*`, while rejecting anything matching `(?i).*(api[_-]?key|secret|token).*` when non-empty.
 
-Expected outcome
-- The suite must pass in a clean environment with no API-key environment variables set and with outbound network disabled.
+2. `_no_network`
+   - Monkeypatches `socket.socket` and `socket.create_connection` to raise `RuntimeError("network disabled in tests")` if a test tries to open a socket.
+
+3. `_isolate_tmp`
+   - Uses pytest's `tmp_path` fixture only and leaves the process-level `TMPDIR`, `TEMP`, and `TMP` variables alone. This avoids cross-test contamination without breaking pytest's own temp-layering.
+
+## Seed / determinism rationale
+
+The deterministic sample-data generator is derived from a fixed symbol and a seeded hash:
+- `backend.engine.build_demo_closes` derives its scale factor from `zlib.adler32(symbol.encode())`;
+- `engine.monte_carlo` seeds its RNG from `zlib.adler32(f"{ticker}:{paths}:{horizon}:{len(returns)}".encode())`.
+
+Repeated runs therefore return the same synthetic series, the same crossover, and the same Monte Carlo label in the same configuration.
+
+## Signal-priority rule
+
+The conflict-resolution rule is documented in `backend/engine.py`:
+- `SIGNAL_PRIORITY = ["crossover_up", "crossover_down", "bullish", "bearish", "signal_buy", "signal_sell", "watch", "hold"]`
+- `engine.resolve_conflict(signals)` returns the winner with the smallest rank in that ordered list.
+- If a signal has no explicit kind, it is treated as `hold`.
+
+This rule is additive and does not change `engine.latest_crossover()`'s legacy single-signal output.
+
+## Transaction costs and slippage
+
+`backend/strategies.py::backtest` accepts:
+- `commission_bps: float = 0.0`
+- `slippage_bps: float = 0.0`
+
+When both are zero, the function preserves the legacy behavior exactly. When either is non-zero:
+- commission is charged at each trade entry and exit, on the trade notional;
+- slippage is applied as adverse fill-price impact at entry and exit;
+- a new `costs_paid` field is added to the result;
+- `equity_curve` and `equity` are emitted so the final equity reduction is directly testable.
+
+## Source changes in this PR
+
+- `backend/engine.py`
+  - Added `SIGNAL_PRIORITY` and `resolve_conflict()`.
+  - Documented the precedence rule without altering `latest_crossover()` output.
+- `backend/strategies.py`
+  - Added `commission_bps` and `slippage_bps` optional keyword arguments.
+  - Preserved the exact legacy output when both values are zero.
+  - Added cost-aware equity-tracking fields (`costs_paid`, `equity_curve`, `equity`) when costs are enabled.
+- `tests/conftest.py`
+  - Added the offline/no-key guardrails for the test suite.
+- `tests/test_offline_sample_mode.py`
+  - Added the smoke test.
+- `tests/test_determinism.py`
+  - Added determinism and rolling-window checks.
+- `tests/test_lookahead_bias.py`
+  - Added the lookahead-bias guard.
+- `tests/test_edge_cases.py`
+  - Added edge-case robustness coverage.
+- `tests/test_signal_priority.py`
+  - Added the real conflict-resolution test.
+- `tests/test_backtest_costs.py`
+  - Added the cost/slippage regression test.

@@ -1,4 +1,10 @@
-"""SMA crossover scan and Monte Carlo labels. No network, no tokens."""
+"""SMA crossover scan and Monte Carlo labels.
+
+Conflict rule:
+When multiple internal signal sources fire on the same bar, resolve by the
+highest-priority signal in SIGNAL_PRIORITY. This helper is additive and leaves
+latest_crossover()'s single-signal behavior unchanged for backward compatibility.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +16,17 @@ from zoneinfo import ZoneInfo
 import numpy as np
 
 IST = ZoneInfo("Asia/Kolkata")
+
+SIGNAL_PRIORITY = [
+    "crossover_up",
+    "crossover_down",
+    "bullish",
+    "bearish",
+    "signal_buy",
+    "signal_sell",
+    "watch",
+    "hold",
+]
 
 SIGNAL_GUIDE = [
     {
@@ -29,6 +46,39 @@ SIGNAL_GUIDE = [
         "text": "A crossover is on the board, yet the simulation does not support buying or selling.",
     },
 ]
+
+
+def resolve_conflict(signals: list[dict[str, Any]] | list[str] | None) -> dict[str, Any] | str | None:
+    """Return the highest-priority signal from a list of candidates.
+
+    Each item may provide either a `kind`, `signal`, or `name`. The winner is
+    chosen by SIGNAL_PRIORITY, with earlier entries outranking later ones.
+    """
+    if not signals:
+        return None
+
+    lookup = {name: index for index, name in enumerate(SIGNAL_PRIORITY)}
+
+    def normalize(candidate: Any) -> str:
+        if isinstance(candidate, dict):
+            for key in ("kind", "signal", "name"):
+                value = candidate.get(key)
+                if value is not None:
+                    return str(value).strip().lower()
+            return "hold"
+        if candidate is None:
+            return "hold"
+        return str(candidate).strip().lower()
+
+    winner: Any = None
+    winner_rank: int | None = None
+    for candidate in signals:
+        key = normalize(candidate)
+        rank = lookup.get(key, lookup.get("hold", len(lookup)))
+        if winner_rank is None or rank < winner_rank:
+            winner = candidate
+            winner_rank = rank
+    return winner
 
 
 def sma(values: np.ndarray, window: int) -> np.ndarray:
@@ -273,7 +323,6 @@ def build_demo_closes(
 
 def rank_rows(rows: list[dict[str, Any]], max_stocks: int) -> list[dict[str, Any]]:
     ordered = sorted(rows, key=lambda row: (row["crossover_date"], row["ticker"]), reverse=True)
-    # Date desc, ticker asc on the same date.
     ordered.sort(key=lambda row: row["ticker"])
     ordered.sort(key=lambda row: row["crossover_date"], reverse=True)
     trimmed = ordered[:max_stocks]

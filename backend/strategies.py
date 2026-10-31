@@ -181,7 +181,18 @@ def _ema_skip_nan(values: np.ndarray, span: int) -> np.ndarray:
     return out
 
 
-def backtest(strategy_id: str, candles: list[dict[str, Any]]) -> dict[str, Any]:
+def backtest(
+    strategy_id: str,
+    candles: list[dict[str, Any]],
+    commission_bps: float = 0.0,
+    slippage_bps: float = 0.0,
+) -> dict[str, Any]:
+    """Run a long-only close-to-close backtest.
+
+    commission_bps: basis points deducted on each trade entry and exit.
+    slippage_bps: adverse basis points applied to entry and exit fill prices.
+    The defaults keep legacy behavior identical when both are zero.
+    """
     if strategy_id not in _IDS:
         raise ValueError("Unknown strategy")
     rows = [c for c in candles if isinstance(c, dict) and c.get("close")]
@@ -191,6 +202,7 @@ def backtest(strategy_id: str, candles: list[dict[str, Any]]) -> dict[str, Any]:
     closes = np.array([float(c["close"]) for c in rows], dtype=float)
     dates = [str(c["date"]) for c in rows]
     enter, leave = _signals(strategy_id, closes)
+
     in_pos = False
     entry_price = 0.0
     entry_date = ""
@@ -198,17 +210,25 @@ def backtest(strategy_id: str, candles: list[dict[str, Any]]) -> dict[str, Any]:
     equity = 1.0
     peak = 1.0
     max_dd = 0.0
+    costs_paid = 0.0
+    equity_curve = [1.0]
+
     for i, price in enumerate(closes):
         if price <= 0:
             continue
         if in_pos and leave[i]:
-            ret = price / entry_price - 1.0
-            equity *= 1.0 + ret
+            entry_fill = entry_price * (1.0 + slippage_bps / 10_000.0)
+            exit_fill = price * (1.0 - slippage_bps / 10_000.0)
+            gross = exit_fill / entry_fill - 1.0
+            fee = abs(entry_fill * commission_bps / 10_000.0) + abs(exit_fill * commission_bps / 10_000.0)
+            net = gross - fee / entry_fill
+            equity *= 1.0 + net
+            costs_paid += fee
             trades.append(
                 {
                     "entry_date": entry_date,
                     "exit_date": dates[i],
-                    "return": round(ret, 4),
+                    "return": round(net, 4),
                 }
             )
             in_pos = False
@@ -216,10 +236,14 @@ def backtest(strategy_id: str, candles: list[dict[str, Any]]) -> dict[str, Any]:
             in_pos = True
             entry_price = float(price)
             entry_date = dates[i]
+
         marked = equity * (price / entry_price) if in_pos and entry_price else equity
         peak = max(peak, marked)
         if peak > 0:
             max_dd = min(max_dd, marked / peak - 1.0)
+        if commission_bps or slippage_bps:
+            equity_curve.append(float(marked))
+
     marked = equity * (closes[-1] / entry_price) if in_pos and entry_price else equity
     wins = sum(1 for trade in trades if trade["return"] > 0)
     shown = [dict(trade, open=False) for trade in trades[-5:]]
@@ -231,7 +255,8 @@ def backtest(strategy_id: str, candles: list[dict[str, Any]]) -> dict[str, Any]:
             "open": True,
         }
         shown = (shown[-4:] if len(shown) == 5 else shown) + [open_row]
-    return {
+
+    result = {
         "strategy": strategy_id,
         "bars": len(rows),
         "from": dates[0],
@@ -245,6 +270,15 @@ def backtest(strategy_id: str, candles: list[dict[str, Any]]) -> dict[str, Any]:
         "last_close": round(float(closes[-1]), 2),
         "recent_trades": shown,
     }
+
+    if commission_bps or slippage_bps:
+        result["equity"] = round(float(marked), 6)
+        result["equity_curve"] = [round(float(value), 6) for value in equity_curve]
+        result["costs_paid"] = round(float(costs_paid), 6)
+        result["commission_bps"] = float(commission_bps)
+        result["slippage_bps"] = float(slippage_bps)
+
+    return result
 
 
 def sample_history(symbol: str) -> list[dict[str, Any]]:
